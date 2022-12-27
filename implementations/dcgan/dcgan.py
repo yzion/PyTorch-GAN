@@ -1,6 +1,7 @@
 import argparse
 import os
 import numpy as np
+import sys
 import math
 
 import torchvision.transforms as transforms
@@ -14,23 +15,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 
-os.makedirs("images", exist_ok=True)
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--n_epochs", type=int, default=200, help="number of epochs of training")
-parser.add_argument("--batch_size", type=int, default=64, help="size of the batches")
-parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
-parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
-parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
-parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
-parser.add_argument("--latent_dim", type=int, default=100, help="dimensionality of the latent space")
-parser.add_argument("--img_size", type=int, default=32, help="size of each image dimension")
-parser.add_argument("--channels", type=int, default=1, help="number of image channels")
-parser.add_argument("--sample_interval", type=int, default=400, help="interval between image sampling")
-opt = parser.parse_args()
-print(opt)
-
-cuda = True if torch.cuda.is_available() else False
+# from cgan.cgan import sample_image, save_images
+sys.path.append('/home/rog1/git/ganet')
+from datasets.stnn_dataset import StnnDataset
+from datasets.flowpic_dataset import FlowPicDataset
+from datasets.flowpic_npy_dataset import FlowPicSingleClassNpy
 
 
 def weights_init_normal(m):
@@ -98,95 +87,155 @@ class Discriminator(nn.Module):
 
         return validity
 
+if __name__ == '__main__':
+    os.makedirs("images", exist_ok=True)
 
-# Loss function
-adversarial_loss = torch.nn.BCELoss()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--n_epochs", type=int, default=200, help="number of epochs of training")
+    parser.add_argument("--batch_size", type=int, default=64, help="size of the batches")
+    parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
+    parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
+    parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
+    parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
+    parser.add_argument("--latent_dim", type=int, default=100, help="dimensionality of the latent space")
+    # parser.add_argument("--img_size_columns", type=int, default=32, help="size of each image columns dimension")
+    # parser.add_argument("--img_size_rows", type=int, default=32, help="size of each image rows dimension")
+    parser.add_argument("--img_size", type=int, default=32, help="size of each image dimension")
+    parser.add_argument("--channels", type=int, default=1, help="number of image channels")
+    parser.add_argument("--sample_interval", type=int, default=400, help="interval between image sampling")
+    opt = parser.parse_args()
+    print(opt)
 
-# Initialize generator and discriminator
-generator = Generator()
-discriminator = Discriminator()
+    cuda = True if torch.cuda.is_available() else False
+    
+    # Loss function
+    adversarial_loss = torch.nn.BCELoss()
 
-if cuda:
-    generator.cuda()
-    discriminator.cuda()
-    adversarial_loss.cuda()
+    # Initialize generator and discriminator
+    generator = Generator()
+    discriminator = Discriminator()
 
-# Initialize weights
-generator.apply(weights_init_normal)
-discriminator.apply(weights_init_normal)
+    if cuda:
+        generator.cuda()
+        discriminator.cuda()
+        adversarial_loss.cuda()
 
-# Configure data loader
-os.makedirs("../../data/mnist", exist_ok=True)
-dataloader = torch.utils.data.DataLoader(
-    datasets.MNIST(
-        "../../data/mnist",
-        train=True,
-        download=True,
-        transform=transforms.Compose(
-            [transforms.Resize(opt.img_size), transforms.ToTensor(), transforms.Normalize([0.5], [0.5])]
-        ),
-    ),
-    batch_size=opt.batch_size,
-    shuffle=True,
-)
+    # Initialize weights
+    generator.apply(weights_init_normal)
+    discriminator.apply(weights_init_normal)
 
-# Optimizers
-optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
-optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+    # Configure data loader
+    data_type = 'npy_mini_flowpic_porat' #  'mini_flowpic_porat' 'flowpic_adi' 'vpn_nonvpn' 'FashionMNIST' 'mnist' 'flowpic'
 
-Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
-# ----------
-#  Training
-# ----------
+    match data_type:
+        case 'FashionMNIST':
+            os.makedirs("../../data/mnist", exist_ok=True)
+            dataloader = torch.utils.data.DataLoader(
+                datasets.MNIST(
+                    "../../data/mnist",
+                    train=True,
+                    download=True,
+                    transform=transforms.Compose(
+                        [transforms.Resize(opt.img_size), transforms.ToTensor(), transforms.Normalize([0.5], [0.5])]
+                    ),
+                ),
+                batch_size=opt.batch_size,
+                shuffle=True,
+            )
+        case 'flowpic':
+                dataloader = torch.utils.data.DataLoader(
+                    FlowPicDataset('/home/rog1/yzion/datasets/data-flowpic-for-y/train_pic_4/all_labels.csv',
+                                root_dir='/home/rog1/yzion/datasets/data-flowpic-for-y/train_pic_4'),
+                    batch_size=opt.batch_size,
+                    shuffle=True,
+                )
+        case 'flowpic_adi': 
+            dataloader = torch.utils.data.DataLoader(
+                FlowPicDataset('/home/rog1/yzion/datasets/flowpic_adi/data/all_pic_splited_train_test_4/train/train_mapgraph_70.csv',
+                            root_dir='/home/rog1/yzion/datasets/flowpic_adi/data/all_pic_splited_train_test_4/train'),
+                batch_size=opt.batch_size,
+                shuffle=True,
+            )
+        case 'mini_flowpic_porat': 
+            dataloader = torch.utils.data.DataLoader(
+                FlowPicDataset('/home/rog1/yzion/datasets/flowpic_porat/FlowPic/MiniFlowPic_Data/all_pic_splited_train_test_1/train/train_porat_quic_mini_flowpic_70.csv',
+                            root_dir='/home/rog1/yzion/datasets/flowpic_porat/FlowPic/MiniFlowPic_Data/all_pic_splited_train_test_1/train'),
+                batch_size=opt.batch_size,
+                shuffle=True,
+            )
+        case 'npy_mini_flowpic_porat':
+            root_dir = '/home/rog1/yzion/datasets/flowpic_porat/FlowPic/MiniFlowPic_Data/class/Youtube/class_Youtube.npy'
+            dataloader = torch.utils.data.DataLoader(
+                FlowPicSingleClassNpy(root_dir),
+                batch_size=opt.batch_size,
+                shuffle=True,
+            )
+        case 'vpn_nonvpn':
+            dataloader = torch.utils.data.DataLoader(
+                StnnDataset(
+                    csv_file='/home/rog1/yzion/pcaps/all_pcaps_ISCX-VPN-NonVPN-2016/vpn_nonvpn_full_dataset.csv'),
+                batch_size=opt.batch_size,
+                shuffle=True,
+            )
 
-for epoch in range(opt.n_epochs):
-    for i, (imgs, _) in enumerate(dataloader):
+    # Optimizers
+    optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+    optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
 
-        # Adversarial ground truths
-        valid = Variable(Tensor(imgs.shape[0], 1).fill_(1.0), requires_grad=False)
-        fake = Variable(Tensor(imgs.shape[0], 1).fill_(0.0), requires_grad=False)
+    Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
-        # Configure input
-        real_imgs = Variable(imgs.type(Tensor))
+    # ----------
+    #  Training
+    # ----------
 
-        # -----------------
-        #  Train Generator
-        # -----------------
+    for epoch in range(opt.n_epochs):
+        for i, (imgs, _) in enumerate(dataloader):
 
-        optimizer_G.zero_grad()
+            # Adversarial ground truths
+            valid = Variable(Tensor(imgs.shape[0], 1).fill_(1.0), requires_grad=False)
+            fake = Variable(Tensor(imgs.shape[0], 1).fill_(0.0), requires_grad=False)
 
-        # Sample noise as generator input
-        z = Variable(Tensor(np.random.normal(0, 1, (imgs.shape[0], opt.latent_dim))))
+            # Configure input
+            real_imgs = Variable(imgs.type(Tensor))
 
-        # Generate a batch of images
-        gen_imgs = generator(z)
+            # -----------------
+            #  Train Generator
+            # -----------------
 
-        # Loss measures generator's ability to fool the discriminator
-        g_loss = adversarial_loss(discriminator(gen_imgs), valid)
+            optimizer_G.zero_grad()
 
-        g_loss.backward()
-        optimizer_G.step()
+            # Sample noise as generator input
+            z = Variable(Tensor(np.random.normal(0, 1, (imgs.shape[0], opt.latent_dim))))
 
-        # ---------------------
-        #  Train Discriminator
-        # ---------------------
+            # Generate a batch of images
+            gen_imgs = generator(z)
 
-        optimizer_D.zero_grad()
+            # Loss measures generator's ability to fool the discriminator
+            g_loss = adversarial_loss(discriminator(gen_imgs), valid)
 
-        # Measure discriminator's ability to classify real from generated samples
-        real_loss = adversarial_loss(discriminator(real_imgs), valid)
-        fake_loss = adversarial_loss(discriminator(gen_imgs.detach()), fake)
-        d_loss = (real_loss + fake_loss) / 2
+            g_loss.backward()
+            optimizer_G.step()
 
-        d_loss.backward()
-        optimizer_D.step()
+            # ---------------------
+            #  Train Discriminator
+            # ---------------------
 
-        print(
-            "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
-            % (epoch, opt.n_epochs, i, len(dataloader), d_loss.item(), g_loss.item())
-        )
+            optimizer_D.zero_grad()
 
-        batches_done = epoch * len(dataloader) + i
-        if batches_done % opt.sample_interval == 0:
-            save_image(gen_imgs.data[:25], "images/%d.png" % batches_done, nrow=5, normalize=True)
+            # Measure discriminator's ability to classify real from generated samples
+            real_loss = adversarial_loss(discriminator(real_imgs), valid)
+            fake_loss = adversarial_loss(discriminator(gen_imgs.detach()), fake)
+            d_loss = (real_loss + fake_loss) / 2
+
+            d_loss.backward()
+            optimizer_D.step()
+
+            print(
+                "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
+                % (epoch, opt.n_epochs, i, len(dataloader), d_loss.item(), g_loss.item())
+            )
+
+            batches_done = epoch * len(dataloader) + i
+            if batches_done % opt.sample_interval == 0:
+                save_image(gen_imgs.data[:25], "images/%d.png" % batches_done, nrow=5, normalize=True)
